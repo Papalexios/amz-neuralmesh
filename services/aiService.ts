@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from '@google/genai';
 import { AIAnalysisResult, SemanticNode, AIConfig, ReferenceData, PAAData, ProductDetection, AmazonProduct } from '../types';
 import { searchAmazonProduct } from './amazonService';
@@ -177,17 +176,10 @@ const cleanJsonOutput = (text: string): string => {
   // MOLECULAR SANITIZER: Strip control characters \x00-\x1F
   clean = clean.replace(/[\x00-\x1F]/g, '');
 
-  // Flatten newlines
+  // Flatten newlines to prevent "Bad control character"
   clean = clean.replace(/\n/g, ' '); 
   clean = clean.replace(/\r/g, '');
   clean = clean.replace(/\t/g, ' ');
-
-  // SOTA FIX: Normalize quotes inside HTML values
-  clean = clean.replace(/: "(.*?)"/g, (match, content) => {
-      // Inside the value, swap double quotes for single quotes if they look like HTML attributes
-      const fixedContent = content.replace(/\\"/g, '"').replace(/"/g, "'").replace(/'/g, "\\'"); 
-      return `: "${content.replace(/"/g, "'")}"`; 
-  });
 
   return clean;
 };
