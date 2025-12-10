@@ -11,6 +11,7 @@ import { ReviewResults } from './components/ReviewResults';
 import { SettingsModal } from './components/SettingsModal';
 import { Network, BrainCircuit, Settings, DownloadCloud, Square, ArrowLeft, Activity } from 'lucide-react';
 import { DEFAULT_MODELS } from './constants';
+import { LandingPage } from './components/LandingPage';
 
 const WORKER_CODE = `
 const tokenize = (text) => {
@@ -132,6 +133,7 @@ const generateEntitySchema = (post: WPPostFull | WPPostHeader, assets: AIAnalysi
 };
 
 const App: React.FC = () => {
+  const [showLanding, setShowLanding] = useState(true);
   const [connection, setConnection] = useState<WPConnection | null>(null);
   const [posts, setPosts] = useState<WPPostHeader[]>([]);
   const [healthData, setHealthData] = useState<Record<number, PostHealth>>({});
@@ -507,6 +509,11 @@ const App: React.FC = () => {
   };
 
   const stopProcessing = () => { setQueue([]); setProcessing([]); setLoadingMsg(''); };
+
+  // --- SOTA LANDING PAGE INTEGRATION ---
+  if (showLanding) {
+      return <LandingPage onEnterApp={() => setShowLanding(false)} />;
+  }
 
   if (!connection) return <ConnectModal onConnect={handleConnect} />;
 

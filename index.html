@@ -33,17 +33,25 @@
       }
     </script>
     <style>
+      /* Glassmorphism Global Styles */
+      .glass-panel {
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.5);
+      }
+      
       /* Custom Scrollbar */
       ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 6px;
+        height: 6px;
       }
       ::-webkit-scrollbar-track {
-        background: #f1f5f9;
+        background: transparent;
       }
       ::-webkit-scrollbar-thumb {
         background: #cbd5e1;
-        border-radius: 4px;
+        border-radius: 99px;
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #94a3b8;
@@ -64,7 +72,7 @@
 }
 </script>
 </head>
-  <body class="bg-slate-50 text-slate-900 antialiased h-screen overflow-hidden">
+  <body class="bg-slate-50 text-slate-900 antialiased h-screen overflow-hidden selection:bg-brand-500/30">
     <div id="root" class="h-full"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

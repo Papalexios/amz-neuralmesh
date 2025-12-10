@@ -34,24 +34,18 @@ const saveToCache = (query: string, data: AmazonProduct) => {
   } catch (e) {}
 };
 
-// SOTA DETERMINISTIC GENERATOR
-// Hashes a string to a number to ensure consistent simulations
 const stringToHash = (str: string) => {
     let hash = 0;
     if (str.length === 0) return hash;
     for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i);
         hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32bit integer
+        hash = hash & hash;
     }
     return Math.abs(hash);
 };
 
 export const searchAmazonProduct = async (query: string, config: AIConfig): Promise<AmazonProduct | null> => {
-  if (!config.amazonAffiliateTag) {
-    // Optional: Log warning or handle missing tag
-  }
-
   // Fallback for empty queries
   if (!query || query.length < 2) {
       return generateDeterministicSimulation("Top Rated Product", config.amazonAffiliateTag || 'tag-20');
@@ -68,27 +62,22 @@ export const searchAmazonProduct = async (query: string, config: AIConfig): Prom
   return result;
 };
 
-const generateDeterministicSimulation = (query: string, tag: string): AmazonProduct => {
+export const generateDeterministicSimulation = (query: string, tag: string): AmazonProduct => {
     const currentYear = new Date().getFullYear();
     const hash = stringToHash(query);
     
-    // Deterministic Price Generation ($20 - $2000)
     const priceMajor = (hash % 1980) + 20; 
     const priceMinor = (hash % 99);
     const price = `$${priceMajor}.${priceMinor.toString().padStart(2, '0')}`;
 
-    // Deterministic Rating (3.5 - 5.0)
     const ratingRaw = (hash % 15) + 35;
     const rating = (ratingRaw / 10).toFixed(1);
     
-    // Deterministic Review Count (50 - 5000)
     const reviewCount = ((hash % 4950) + 50).toLocaleString();
 
-    // Deterministic Image Selection
     const hue = hash % 360;
     const image = `https://placehold.co/800x800/${hue.toString(16).substring(0,6)}/ffffff?text=${encodeURIComponent(query.substring(0, 15))}`;
 
-    // Smart Title Generation
     const titleBase = query.replace(/\b\w/g, l => l.toUpperCase());
     const suffixes = ["Pro", "Ultra", "Elite", "Max", "Advanced", "Series X", "Gen 5"];
     const suffix = suffixes[hash % suffixes.length];
@@ -96,7 +85,7 @@ const generateDeterministicSimulation = (query: string, tag: string): AmazonProd
     const title = `${titleBase} ${suffix} [${currentYear} Upgrade] - High Performance`;
 
     return {
-        asin: "B0" + Math.random().toString(36).substr(2, 8).toUpperCase(), // Simulated ASIN
+        asin: "B0" + Math.random().toString(36).substr(2, 8).toUpperCase(),
         title: title,
         imageUrl: image,
         price: price,

@@ -27,36 +27,18 @@ interface AIResponseSchema {
   usedInternalLinks?: string[];
 }
 
-export const getEmbedding = async (text: string, apiKey: string): Promise<number[]> => {
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const result = await ai.models.embedContent({
-      model: 'text-embedding-004',
-      contents: text,
-    });
-    return result.embeddings?.[0]?.values || [];
-  } catch (e) {
-    console.warn("Embedding generation failed, falling back to keyword match", e);
-    return [];
-  }
-};
-
 // SOTA LINK FIREWALL (Fuzzy Matching)
 const validateAndSanitizeLinks = (html: string, validNodes: SemanticNode[], siteUrl: string): string => {
   const validPaths = new Set<string>();
   
-  // Normalizer: strips protocol, domain, trailing slash, query params
   const normalize = (u: string) => {
     try {
         let clean = u.toLowerCase().trim();
-        // Remove domain if present
         if (clean.startsWith('http')) {
             const urlObj = new URL(clean);
             clean = urlObj.pathname;
         }
-        // Ensure starting slash
         if (!clean.startsWith('/')) clean = '/' + clean;
-        // Remove trailing slash
         return clean.replace(/\/$/, '');
     } catch {
         return u.replace(/\/$/, '').toLowerCase();
@@ -79,17 +61,14 @@ const validateAndSanitizeLinks = (html: string, validNodes: SemanticNode[], site
     if (isInternalCandidate) {
         const isValid = validPaths.has(normalizedTarget);
         if (isValid) {
-            // Find the canonical full URL from the node list
             const matchedNode = validNodes.find(n => normalize(n.url) === normalizedTarget);
             const finalUrl = matchedNode ? matchedNode.url : cleanHref;
             return `<a href="${finalUrl}" class="sota-internal-link" title="Read more: ${text.replace(/"/g, '')}">${text}</a>`;
         } else {
-            // Strip hallucinated links
             return `<span class="sota-text-highlight" title="Link stripped - not in sitemap">${text}</span>`;
         }
     }
     
-    // Auto-tag affiliate links
     if (cleanHref.includes('amazon') || cleanHref.includes('amzn.to')) {
          return `<a href="${cleanHref}" target="_blank" rel="nofollow sponsored" class="sota-affiliate-link">${text}</a>`;
     }
@@ -100,19 +79,15 @@ const validateAndSanitizeLinks = (html: string, validNodes: SemanticNode[], site
 
 const forceHtmlStructure = (text: string): string => {
   let clean = text;
-  // Remove AI meta-commentary
   clean = clean.replace(/\(\d+\s*words,?\s*total\s*\d+\)/gi, '');
   clean = clean.replace(/\[End of section\]/gi, '');
   clean = clean.replace(/^Here is the .*?:/gim, '');
   clean = clean.replace(/^Bottom Line Up Front:/gim, '');
   clean = clean.replace(/^Quick Verdict:/gim, '');
   
-  // Force Markdown to HTML
   clean = clean.replace(/^##\s+(.*$)/gim, '<h2>$1</h2>');
   clean = clean.replace(/^###\s+(.*$)/gim, '<h3>$1</h3>');
-  clean = clean.replace(/^####\s+(.*$)/gim, '<h4>$1</h4>');
   clean = clean.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  clean = clean.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
   
   if (!clean.includes('<ul>') && (clean.includes('\n- ') || clean.includes('\n* '))) {
       clean = clean.replace(/(?:^|\n)[-*]\s+(.*)/g, '<li>$1</li>');
@@ -121,10 +96,7 @@ const forceHtmlStructure = (text: string): string => {
   return clean.trim();
 };
 
-// DIRTY JSON RESCUE ENGINE
-// Extracts JSON fields via Regex if JSON.parse fails.
 const extractFieldRegex = (text: string, key: string): string => {
-    // Look for key: "value", handling escaped quotes
     const regex = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, 's');
     const match = text.match(regex);
     if (match && match[1]) {
@@ -147,10 +119,10 @@ const extractVerdictRegex = (text: string) => {
 
         return {
             score: scoreMatch ? parseInt(scoreMatch[1]) : 85,
-            summary: summaryMatch ? summaryMatch[1].replace(/\\"/g, '"') : "Verdict analysis available in deep dive below.",
-            pros: prosMatch ? parseList(prosMatch[1]) : ["High Performance", "Good Value"],
-            cons: consMatch ? parseList(consMatch[1]) : ["Check availability"],
-            targetAudience: "Enthusiasts"
+            summary: summaryMatch ? summaryMatch[1].replace(/\\"/g, '"') : "Verdict analysis available in deep dive.",
+            pros: prosMatch ? parseList(prosMatch[1]) : ["High Performance", "Modern Features"],
+            cons: consMatch ? parseList(consMatch[1]) : ["Check latest price"],
+            targetAudience: "Tech Enthusiasts"
         };
     } catch {
         return { score: 0, pros: [], cons: [], summary: "Error extracting verdict.", targetAudience: "General" };
@@ -168,9 +140,7 @@ const cleanJsonOutput = (text: string): string => {
     clean = clean.substring(start, end + 1);
   }
   
-  // Remove comments
   clean = clean.replace(/\/\/.*$/gm, ''); 
-  // Remove trailing commas
   clean = clean.replace(/,(\s*[}\]])/g, '$1');
   
   // MOLECULAR SANITIZER: Strip control characters \x00-\x1F
@@ -189,7 +159,6 @@ const parseAIResponse = (text: string | undefined, references: ReferenceData[], 
 
   let parsed: AIResponseSchema | null = null;
   
-  // ATTEMPT 1: Standard Parse with SOTA Cleaning
   try {
     const cleanJson = cleanJsonOutput(text);
     parsed = JSON.parse(cleanJson) as AIResponseSchema;
@@ -197,7 +166,6 @@ const parseAIResponse = (text: string | undefined, references: ReferenceData[], 
     console.warn("Standard JSON parse failed. Attempting Dirty Rescue...", e);
   }
 
-  // ATTEMPT 2: Dirty Rescue (Regex Extraction)
   if (!parsed) {
       console.log("Engaging Regex Rescue Engine");
       parsed = {
@@ -226,7 +194,6 @@ const parseAIResponse = (text: string | undefined, references: ReferenceData[], 
           const img = doc.querySelector('[data-sota-type="product-image"]') || doc.querySelector('img.sota-product-image') || doc.querySelector('img');
           if (img) {
               img.setAttribute('src', amazonProduct.imageUrl);
-              img.setAttribute('alt', amazonProduct.title);
               img.setAttribute('data-sota-type', 'product-image');
           }
 
@@ -240,12 +207,11 @@ const parseAIResponse = (text: string | undefined, references: ReferenceData[], 
           if (linkEl) {
               linkEl.setAttribute('href', amazonProduct.url);
               linkEl.setAttribute('data-sota-type', 'product-link');
-              linkEl.innerHTML = `Check Best Price &rarr;`; 
+              linkEl.innerHTML = `Check Price &rarr;`; 
           }
           
           finalProductBox = doc.body.innerHTML;
       } catch (e) {
-          console.warn("DOM Injection failed, fallback", e);
           finalProductBox = finalProductBox.replace(/src=["'][^"']*placeholder[^"']*["']/gi, `src='${amazonProduct.imageUrl}'`);
       }
   }
@@ -296,7 +262,7 @@ const extractTopKeywords = (refs: ReferenceData[]): string[] => {
 };
 
 const callOpenAICompatible = async (url: string, model: string, apiKey: string, system: string, prompt: string) => {
-    const TIMEOUT_MS = 900000; // 15 Minutes
+    const TIMEOUT_MS = 900000; 
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -307,7 +273,6 @@ const callOpenAICompatible = async (url: string, model: string, apiKey: string, 
             temperature: 0.7,
             max_tokens: 8192
         };
-        // Some models (DeepSeek/Grok) fail with json_object mode, allow retry without
         if (useJsonMode) bodyPayload.response_format = { type: "json_object" };
 
         const res = await fetch(url, {
@@ -361,7 +326,6 @@ const callGemini = async (model: string, apiKey: string, system: string, prompt:
     return response.text;
 };
 
-// SOTA Entity Extraction for Amazon
 const extractCoreEntity = (title: string): string => {
     let text = title;
     if (text.includes('http') || text.includes('/')) {
@@ -395,7 +359,6 @@ export const analyzeAndGenerateAssets = async (
   const semanticKeywords = extractTopKeywords(externalRefs);
   const targetYear = new Date().getFullYear() + 1;
 
-  // --- STEP 1: AUTONOMOUS RESEARCH ---
   const coreEntity = extractCoreEntity(currentTitle);
   let amazonProduct: AmazonProduct | null = null;
   
@@ -404,7 +367,6 @@ export const analyzeAndGenerateAssets = async (
       amazonProduct = await searchAmazonProduct(coreEntity, config);
   }
 
-  // --- STEP 2: VISUALS ---
   const PRODUCT_BOX_DESIGN = `
     DESIGN INSTRUCTION:
     Generate 'productBoxHTML' using EXACTLY this DOM structure.
@@ -428,7 +390,6 @@ export const analyzeAndGenerateAssets = async (
     </div>
   `;
 
-  // --- STEP 3: MESH INVENTORY ---
   const meshInventory = semanticNeighbors
       .map((n, i) => `[LINK_${i}] URL: ${n.url} | Title: "${n.title}"`)
       .join('\n');
