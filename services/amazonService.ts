@@ -1,4 +1,3 @@
-
 import { AmazonProduct, AIConfig } from '../types';
 
 const CACHE_PREFIX = 'AMZN_PAAPI_V2_';
@@ -10,6 +9,7 @@ interface CachedItem {
 }
 
 const getFromCache = (query: string): AmazonProduct | null => {
+  if (typeof window === 'undefined') return null;
   try {
     const key = CACHE_PREFIX + query.toLowerCase().trim();
     const raw = localStorage.getItem(key);
@@ -26,6 +26,7 @@ const getFromCache = (query: string): AmazonProduct | null => {
 };
 
 const saveToCache = (query: string, data: AmazonProduct) => {
+  if (typeof window === 'undefined') return;
   try {
     const key = CACHE_PREFIX + query.toLowerCase().trim();
     const item: CachedItem = { timestamp: Date.now(), data };
@@ -84,12 +85,10 @@ const generateDeterministicSimulation = (query: string, tag: string): AmazonProd
     const reviewCount = ((hash % 4950) + 50).toLocaleString();
 
     // Deterministic Image Selection
-    // We use placehold.co but with specific colors based on hash to feel unique
     const hue = hash % 360;
     const image = `https://placehold.co/800x800/${hue.toString(16).substring(0,6)}/ffffff?text=${encodeURIComponent(query.substring(0, 15))}`;
 
     // Smart Title Generation
-    // Capitalize words
     const titleBase = query.replace(/\b\w/g, l => l.toUpperCase());
     const suffixes = ["Pro", "Ultra", "Elite", "Max", "Advanced", "Series X", "Gen 5"];
     const suffix = suffixes[hash % suffixes.length];
@@ -110,6 +109,6 @@ const generateDeterministicSimulation = (query: string, tag: string): AmazonProd
         ],
         rating: rating,
         reviewCount: reviewCount,
-        isPrime: (hash % 10) > 2 // 80% chance of Prime
+        isPrime: (hash % 10) > 2 
     };
 };

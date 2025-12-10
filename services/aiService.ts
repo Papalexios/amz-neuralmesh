@@ -32,9 +32,9 @@ export const getEmbedding = async (text: string, apiKey: string): Promise<number
     const ai = new GoogleGenAI({ apiKey });
     const result = await ai.models.embedContent({
       model: 'text-embedding-004',
-      content: text,
+      contents: text,
     });
-    return result.embedding.values;
+    return result.embeddings?.[0]?.values || [];
   } catch (e) {
     console.warn("Embedding generation failed, falling back to keyword match", e);
     return [];

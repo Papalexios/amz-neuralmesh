@@ -1,5 +1,5 @@
 {
-  "name": "seo-content-refresher-ai-(intro/key-takeaways/hiqh-quality-copariosn-table/faqs/conclusion/references)-beta-6",
+  "name": "neural-mesh-seo",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,18 +9,20 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/genai": "^1.32.0",
+    "lucide-react": "^0.556.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
-    "lucide-react": "^0.556.0",
-    "@google/genai": "^1.32.0",
-    "recharts": "^3.5.1",
-    "vite": "^7.2.7",
-    "@vitejs/plugin-react": "^5.1.2"
+    "recharts": "^3.5.1"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "@types/react": "^19.2.1",
+    "@types/react-dom": "^19.2.1",
+    "@vitejs/plugin-react": "^5.1.2",
+    "autoprefixer": "^10.4.18",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.4.1"
   }
 }
