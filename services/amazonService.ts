@@ -48,9 +48,7 @@ const stringToHash = (str: string) => {
 
 export const searchAmazonProduct = async (query: string, config: AIConfig): Promise<AmazonProduct | null> => {
   if (!config.amazonAffiliateTag) {
-    // console.warn("Amazon Affiliate Tag missing.");
-    // Allow logic to proceed for demo purposes if needed, but standard is to return null
-    // return null; 
+    // Optional: Log warning or handle missing tag
   }
 
   // Fallback for empty queries
@@ -85,7 +83,7 @@ const generateDeterministicSimulation = (query: string, tag: string): AmazonProd
     // Deterministic Review Count (50 - 5000)
     const reviewCount = ((hash % 4950) + 50).toLocaleString();
 
-    // Deterministic Image Selection (from high quality placeholders or category logic)
+    // Deterministic Image Selection
     // We use placehold.co but with specific colors based on hash to feel unique
     const hue = hash % 360;
     const image = `https://placehold.co/800x800/${hue.toString(16).substring(0,6)}/ffffff?text=${encodeURIComponent(query.substring(0, 15))}`;
@@ -99,9 +97,9 @@ const generateDeterministicSimulation = (query: string, tag: string): AmazonProd
     const title = `${titleBase} ${suffix} [${currentYear} Upgrade] - High Performance`;
 
     return {
-        asin: "B0" + Math.random().toString(36).substr(2, 8).toUpperCase(), // Random ASIN is fine, simulated
+        asin: "B0" + Math.random().toString(36).substr(2, 8).toUpperCase(), // Simulated ASIN
         title: title,
-        imageUrl: image, // In a real app, this would be a proxied Amazon image
+        imageUrl: image,
         price: price,
         url: `https://www.amazon.com/s?k=${encodeURIComponent(query)}&tag=${tag}`,
         features: [
