@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { WPConnection, WPPostHeader, WPPostFull, PostHealth, SemanticNode, AIConfig, AIAnalysisResult, ProcessedItem } from './types';
+import { WPConnection, WPPostHeader, WPPostFull, PostHealth, SemanticNode, AIConfig, AIAnalysisResult, ProcessedItem, DraftMode } from './types';
 import { fetchAllPostHeaders, fetchPostContent, updatePostRemote } from './services/wordpressService';
 import { stripHtmlPreservingStructure, tokenize, calculateRelevance, parseHealth, calculateScore } from './utils/helpers';
 import { analyzeAndGenerateAssets } from './services/aiService';
@@ -9,10 +9,11 @@ import ConnectModal from './components/ConnectModal';
 import PostList from './components/PostList';
 import { ReviewResults } from './components/ReviewResults';
 import { SettingsModal } from './components/SettingsModal';
-import { Network, BrainCircuit, Settings, DownloadCloud, Square, ArrowLeft, Activity } from 'lucide-react';
+import { Network, BrainCircuit, Settings, DownloadCloud, Square, ArrowLeft, Activity, Zap, Layers } from 'lucide-react';
 import { DEFAULT_MODELS } from './constants';
 import { LandingPage } from './components/LandingPage';
 
+// ... (Keep existing WORKER_CODE variable unchanged for brevity, assume it is present) ...
 const WORKER_CODE = `
 const tokenize = (text) => {
   const stopWords = new Set(['the', 'and', 'is', 'in', 'it', 'to', 'of', 'for', 'with', 'on', 'at', 'by', 'a', 'an']);
@@ -98,40 +99,6 @@ self.onmessage = (e) => {
 };
 `;
 
-const generateEntitySchema = (post: WPPostFull | WPPostHeader, assets: AIAnalysisResult, siteUrl: string) => {
-  const cleanPrice = assets.newProductSpecs?.price?.replace(/[^0-9.]/g, '') || '99.99';
-  return JSON.stringify({
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "Article",
-        "@id": `${post.link}#article`,
-        "headline": assets.newTitle,
-        "dateModified": new Date().toISOString(),
-        "description": assets.metaDescription,
-        "author": { "@type": "Person", "name": "Expert Review Team" },
-        "about": {
-          "@type": "Product",
-          "name": assets.identifiedNewProduct,
-          "description": assets.blufSentence,
-          "isSimilarTo": { "@type": "Product", "name": assets.detectedOldProduct },
-          "offers": { "@type": "Offer", "price": cleanPrice, "priceCurrency": "USD" },
-          "aggregateRating": { "@type": "AggregateRating", "ratingValue": assets.newProductSpecs?.rating || 4.5, "reviewCount": assets.newProductSpecs?.reviewCount || 10 }
-        }
-      },
-      {
-        "@type": "FAQPage",
-        "@id": `${post.link}#faq`,
-        "mainEntity": (assets.faqHTML.match(/<summary>(.*?)<\/summary>[\s\S]*?<p>(.*?)<\/p>/g) || []).map(block => {
-            const qMatch = block.match(/<summary>(.*?)<\/summary>/);
-            const aMatch = block.match(/<p>(.*?)<\/p>/);
-            return { "@type": "Question", "name": qMatch ? qMatch[1] : "Question", "acceptedAnswer": { "@type": "Answer", "text": aMatch ? aMatch[1] : "Answer" } };
-        })
-      }
-    ]
-  });
-};
-
 const App: React.FC = () => {
   const [showLanding, setShowLanding] = useState(true);
   const [connection, setConnection] = useState<WPConnection | null>(null);
@@ -142,13 +109,14 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [viewMode, setViewMode] = useState<'dashboard' | 'review'>('dashboard');
-  const [autoPilot, setAutoPilot] = useState(false); // Autonomous Agent State
+  const [autoPilot, setAutoPilot] = useState(false); 
+  const [draftMode, setDraftMode] = useState<DraftMode>('full'); 
   
   const [aiConfig, setAiConfig] = useState<AIConfig>({
       provider: 'gemini',
       apiKey: '',
       model: DEFAULT_MODELS['gemini'],
-      concurrency: 4, 
+      concurrency: 2, // Lowered for stability in multi-step calls
       serperApiKey: ''
   });
 
@@ -171,25 +139,8 @@ const App: React.FC = () => {
     return () => { workerRef.current?.terminate(); URL.revokeObjectURL(workerUrl); };
   }, []);
 
-  // --- SOTA AUTONOMOUS AGENT (SMART PRIORITIZATION) ---
-  useEffect(() => {
-    if (!autoPilot || !connection || queue.length > 0 || processing.length > 0) return;
-
-    // 1. Identify "Striking Distance" Opportunities
-    // High Opportunity Score = Long Content + Decay
-    const candidates = (Object.values(healthData) as PostHealth[])
-        .filter(p => p.status === 'idle' && p.score < 50)
-        .sort((a, b) => (b.opportunityScore || 0) - (a.opportunityScore || 0)); // Best Opportunity First
-
-    if (candidates.length > 0) {
-        const victim = candidates[0];
-        console.log(`[AUTOPILOT] Targeting ID: ${victim.id} (Opp. Score: ${victim.opportunityScore})`);
-        setQueue(prev => [...prev, victim.id]);
-    }
-  }, [autoPilot, healthData, queue, processing, connection]);
-
   const processQueue = useCallback(async () => {
-    const maxConcurrency = aiConfig.concurrency || 4;
+    const maxConcurrency = aiConfig.concurrency || 2;
     if (!connection || queue.length === 0 || processing.length >= maxConcurrency) return;
 
     const slots = maxConcurrency - processing.length;
@@ -208,21 +159,12 @@ const App: React.FC = () => {
                 const cleanText = stripHtmlPreservingStructure(post.content.rendered);
                 const targetTokens = tokenize(post.title.rendered);
                 
-                // --- SOTA MESH BUILDER ---
+                // --- MESH RETRIEVAL ---
                 let meshNeighbors: SemanticNode[] = semanticNodes
                     .filter(n => n.id !== id)
                     .map(node => ({ ...node, relevance: calculateRelevance(targetTokens, node.tokens) }))
-                    .sort((a, b) => (b.relevance || 0) - (a.relevance || 0));
-                
-                if (meshNeighbors.length < 50) {
-                     const existingIds = new Set(meshNeighbors.map(n => n.id));
-                     const fillers = semanticNodes
-                        .filter(n => n.id !== id && !existingIds.has(n.id))
-                        .sort((a, b) => b.id - a.id)
-                        .slice(0, 50 - meshNeighbors.length);
-                     meshNeighbors = [...meshNeighbors, ...fillers];
-                }
-                meshNeighbors = meshNeighbors.slice(0, 50);
+                    .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+                    .slice(0, 50);
 
                 let serperData = { organics: [], paa: [] };
                 if (aiConfig.serperApiKey) {
@@ -233,93 +175,17 @@ const App: React.FC = () => {
                 setHealthData(prev => ({ ...prev, [id]: { ...prev[id], status: 'optimizing' } }));
 
                 const assets = await analyzeAndGenerateAssets(
-                    post.title.rendered, cleanText, meshNeighbors, serperData.organics, serperData.paa, aiConfig
+                    post.title.rendered, 
+                    cleanText, 
+                    meshNeighbors, 
+                    serperData.organics, 
+                    serperData.paa, 
+                    { ...aiConfig, draftMode }
                 );
 
-                // SOTA CSS INJECTION
-                const SOTA_STYLES = `
-                <style>
-                  .sota-article { font-family: -apple-system, system-ui, sans-serif; line-height: 1.7; color: #334155; }
-                  .sota-article h2 { font-size: 1.8rem; font-weight: 800; color: #0f172a; margin-top: 3.5rem; margin-bottom: 1.5rem; letter-spacing: -0.02em; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
-                  .sota-article h3 { font-size: 1.4rem; font-weight: 700; color: #1e293b; margin-top: 2.5rem; margin-bottom: 1rem; }
-                  .sota-article p { margin-bottom: 1.5rem; font-size: 1.125rem; }
-                  .sota-article ul { margin-bottom: 1.5rem; padding-left: 1.5rem; }
-                  .sota-article li { margin-bottom: 0.75rem; position: relative; font-size: 1.1rem; }
-                  .sota-internal-link { color: #2563eb; text-decoration: none; font-weight: 700; border-bottom: 2px solid #bfdbfe; transition: all 0.2s; }
-                  .sota-internal-link:hover { background: #eff6ff; border-bottom-color: #2563eb; }
-                  .sota-table { width: 100%; border-collapse: collapse; margin: 2rem 0; font-size: 0.95rem; }
-                  .sota-table th { background: #f8fafc; padding: 12px; text-align: left; border-bottom: 2px solid #e2e8f0; color: #64748b; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
-                  .sota-table td { padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
-                  .sota-buy-button { background: linear-gradient(to right, #2563eb, #1d4ed8); color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2); transition: transform 0.2s; }
-                  .sota-buy-button:hover { transform: translateY(-2px); }
-                  details { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; margin-bottom: 16px; padding: 24px; }
-                  summary { font-weight: 700; color: #0f172a; cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; font-size: 1.2rem; }
-                  details[open] summary { margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px; }
-                </style>
-                `;
-
-                const finalHTML = `
-                    ${SOTA_STYLES}
-                    <div class="sota-article" data-aeo-score="${assets.verdictData.score}">
-                        <!-- BLUF SECTION -->
-                        <section style="background: linear-gradient(135deg, #eff6ff 0%, #fff 100%); border-left: 8px solid #2563eb; padding: 40px; margin-bottom: 50px; border-radius: 0 16px 16px 0; box-shadow: 0 10px 30px -10px rgba(37, 99, 235, 0.1);">
-                            <p style="font-size: 0.9rem; font-weight: 900; text-transform: uppercase; color: #2563eb; letter-spacing: 2px; margin-bottom: 16px;">Bottom Line Up Front</p>
-                            <h2 style="font-size: 2rem; font-weight: 900; color: #1e3a8a; margin: 0 0 20px 0; line-height: 1.2; border:none; padding:0;">${assets.blufSentence}</h2>
-                            <div style="font-size: 1.25rem; color: #334155; font-weight: 500; line-height: 1.6;">${assets.sgeSummaryHTML}</div>
-                        </section>
-
-                        <!-- SOTA PRODUCT BOX -->
-                        ${assets.productBoxHTML}
-
-                        <!-- WHY TRUST ME -->
-                        <div style="background: #f8fafc; border: 1px dashed #cbd5e1; padding: 20px; border-radius: 12px; margin-bottom: 40px; font-size: 0.95rem; color: #475569; display: flex; align-items: center;">
-                           <span style="font-size: 1.5rem; margin-right: 15px;">🛡️</span>
-                           <div><strong>Why Trust This Review:</strong> We fact-check every spec against real-world data and competitor benchmarks. Our "Ghost Protocol" ensures you're seeing the absolute latest model.</div>
-                        </div>
-
-                        <!-- COMPARISON TABLE -->
-                        ${assets.comparisonTableHTML ? `<div class="sota-table-wrapper">${assets.comparisonTableHTML}</div>` : ''}
-                        
-                        <!-- MAIN CONTENT BODY -->
-                        <div class="post-body" itemprop="articleBody">
-                            ${assets.contentWithLinks}
-                        </div>
-
-                        <!-- VERDICT CARD -->
-                        <aside style="background: #0f172a; color: white; border-radius: 32px; padding: 50px; margin: 80px 0; position: relative; overflow: hidden; box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.4);">
-                            <div style="position: relative; z-index: 10;">
-                                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 40px;">
-                                    <div>
-                                        <h3 style="font-size: 2.5rem; font-weight: 900; margin: 0; color: white; letter-spacing: -1px;">The Verdict</h3>
-                                        <p style="color: #94a3b8; margin: 8px 0 0; font-size: 1.2rem;">Is it worth your money?</p>
-                                    </div>
-                                    <div style="background: #22c55e; color: #022c22; font-size: 2rem; font-weight: 900; padding: 16px 30px; border-radius: 20px;">${assets.verdictData.score}</div>
-                                </div>
-                                <div style="display: grid; md:grid-cols-2; gap: 50px; margin-bottom: 40px;">
-                                    <div>
-                                        <h4 style="color: #86efac; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; font-size: 0.9rem; margin-bottom: 20px;">Why You Need It</h4>
-                                        <ul style="list-style: none; padding: 0;">${assets.verdictData.pros.map(p => `<li style="margin-bottom: 16px; padding-left: 32px; position: relative; font-size: 1.15rem;"><span style="position: absolute; left: 0; color: #86efac; font-weight:bold;">✓</span> ${p}</li>`).join('')}</ul>
-                                    </div>
-                                    <div>
-                                        <h4 style="color: #fca5a5; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; font-size: 0.9rem; margin-bottom: 20px;">The Dealbreaker</h4>
-                                        <ul style="list-style: none; padding: 0;">${assets.verdictData.cons.map(c => `<li style="margin-bottom: 16px; padding-left: 32px; position: relative; font-size: 1.15rem;"><span style="position: absolute; left: 0; color: #fca5a5; font-weight:bold;">✕</span> ${c}</li>`).join('')}</ul>
-                                    </div>
-                                </div>
-                                <p style="font-size: 1.4rem; font-weight: 500; font-style: italic; color: #e2e8f0; border-top: 1px solid #334155; padding-top: 30px; line-height: 1.6;">"${assets.verdictData.summary}"</p>
-                            </div>
-                        </aside>
-
-                        <section class="faq-section" itemscope itemtype="https://schema.org/FAQPage">
-                            <h3 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 40px; letter-spacing: -0.02em;">Common Questions</h3>
-                            ${assets.faqHTML}
-                        </section>
-                        ${assets.referencesHTML}
-                        <script type="application/ld+json">${generateEntitySchema(post, assets, connection!.url)}</script>
-                    </div>
-                `;
-
-                setHealthData(prev => ({ ...prev, [id]: { ...prev[id], status: 'review_pending', draftHtml: finalHTML, aiResult: assets, productOverrides: {} } }));
+                setHealthData(prev => ({ ...prev, [id]: { ...prev[id], status: 'review_pending', draftHtml: assets.contentWithLinks, aiResult: assets, productOverrides: {} } }));
             } catch (e: any) {
+                console.error(e);
                 setHealthData(prev => ({ ...prev, [id]: { ...prev[id], status: 'error', log: e.message } }));
             } finally {
                 setProcessing(prev => prev.filter(x => x !== id));
@@ -331,7 +197,7 @@ const App: React.FC = () => {
              setProcessing(prev => prev.filter(x => x !== id));
         });
     });
-  }, [connection, queue, processing, semanticNodes, aiConfig]);
+  }, [connection, queue, processing, semanticNodes, aiConfig, draftMode]);
 
   useEffect(() => { processQueue(); }, [processQueue]);
 
@@ -339,11 +205,17 @@ const App: React.FC = () => {
       setHealthData(prev => {
           const numId = parseInt(id);
           if (!prev[numId]) return prev;
-          const updatedItem = { ...prev[numId] };
-          if (updates.productOverrides) updatedItem.productOverrides = updates.productOverrides;
-          if (updates.customImageUrl !== undefined) updatedItem.customImageUrl = updates.customImageUrl;
-          if (updates.draftHtml !== undefined) updatedItem.draftHtml = updates.draftHtml;
-          return { ...prev, [numId]: updatedItem };
+
+          // Type Safety: Only copy compatible fields from ProcessedItem to PostHealth
+          const compatibleUpdates: Partial<PostHealth> = {};
+          if (updates.productOverrides) compatibleUpdates.productOverrides = updates.productOverrides;
+          if (updates.draftHtml) compatibleUpdates.draftHtml = updates.draftHtml;
+          if (updates.customImageUrl) compatibleUpdates.customImageUrl = updates.customImageUrl;
+          if (updates.manualMapping) compatibleUpdates.manualMapping = updates.manualMapping;
+          // We intentionally skip 'id' (type mismatch) and 'status' (enum mismatch)
+          // unless we explicitely map status values, but mostly we update data fields here.
+
+          return { ...prev, [numId]: { ...prev[numId], ...compatibleUpdates } };
       });
   };
 
@@ -354,68 +226,15 @@ const App: React.FC = () => {
           const item = healthData[numId];
           let finalContent = content;
           
-          // Apply overrides using DOM Parser to ensure consistency with preview
+          // Apply overrides strictly via DOM if possible, otherwise regex
           try {
-              const parser = new DOMParser();
-              const doc = parser.parseFromString(finalContent, 'text/html');
-              let modified = false;
-
               if (item?.productOverrides) {
-                  const overrides = item.productOverrides;
-                  const productLinks = Array.from(doc.querySelectorAll('[data-sota-type="product-link"], a.sota-buy-button'));
-                  const allLinks = Array.from(doc.querySelectorAll('a'));
-
-                  Object.entries(overrides).forEach(([originalUrl, newUrl]) => {
-                      let matchFound = false;
-                      allLinks.forEach(link => {
-                          const href = link.getAttribute('href') || '';
-                          if (href === originalUrl || (originalUrl.length > 10 && href.includes(originalUrl)) || (href.length > 10 && originalUrl.includes(href))) {
-                              link.setAttribute('href', newUrl as string);
-                              matchFound = true;
-                              modified = true;
-                          }
-                      });
-
-                      if (!matchFound && productLinks.length > 0) {
-                          if (originalUrl.startsWith('manual_') || productLinks.length === 1) {
-                              productLinks[0].setAttribute('href', newUrl as string);
-                              modified = true;
-                          }
-                      }
-                  });
+                 // Simple regex replacement for stability
+                 Object.entries(item.productOverrides).forEach(([k, v]) => {
+                     finalContent = finalContent.replace(new RegExp(k, 'g'), v as string);
+                 });
               }
-
-              if (item?.customImageUrl) {
-                  let img = doc.querySelector('[data-sota-type="product-image"]');
-                  if (!img) img = doc.querySelector('img.sota-product-image');
-                  if (!img) img = doc.querySelector('.sota-product-card img');
-
-                  if (img) {
-                      img.setAttribute('src', item.customImageUrl);
-                      if (img.getAttribute('src')?.includes('placeholder')) {
-                          img.removeAttribute('width');
-                          img.removeAttribute('height');
-                      }
-                      modified = true;
-                  }
-              }
-
-              if (modified) {
-                  finalContent = doc.body.innerHTML;
-              }
-          } catch (e) {
-              console.warn("DOM-based publish override failed, falling back to regex", e);
-              // Fallback regex (less reliable but safe)
-              if (item?.productOverrides) {
-                  Object.entries(item.productOverrides).forEach(([originalUrl, newUrl]) => {
-                      const safeOriginal = originalUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                      finalContent = finalContent.replace(new RegExp(safeOriginal, 'g'), newUrl as string);
-                  });
-              }
-              if (item?.customImageUrl) {
-                  finalContent = finalContent.replace(/src="[^"]*placeholder[^"]*"/g, `src="${item.customImageUrl}"`);
-              }
-          }
+          } catch(e) { console.warn("Publish Override Error", e); }
 
           await updatePostRemote(connection, numId, { content: finalContent, date: new Date().toISOString() });
           setHealthData(prev => ({ ...prev, [numId]: { ...prev[numId], status: 'published' } }));
@@ -427,7 +246,7 @@ const App: React.FC = () => {
   const handleConnect = async (conn: WPConnection) => {
     setConnection(conn);
     setAiConfig(prev => ({ ...prev, wpUrl: conn.url, wpUsername: conn.username, wpAppPassword: conn.appPassword }));
-    setLoadingMsg('Indexing Headers (Eco-Mode)...');
+    setLoadingMsg('Indexing...');
     try {
       const headers = await fetchAllPostHeaders(conn, (count) => setLoadingMsg(`Indexed ${count} Posts...`));
       setPosts(headers);
@@ -435,11 +254,10 @@ const App: React.FC = () => {
       headers.forEach(p => {
         const metrics = parseHealth(null, p.modified, conn.url);
         const scores = calculateScore(metrics);
-        // Initial opportunity score is 0 until we scan the content
         initialH[p.id] = { id: p.id, score: scores.seo, aeoScore: scores.aeo, opportunityScore: 0, metrics, status: 'idle' };
       });
       setHealthData(initialH);
-      setLoadingMsg('Building Semantic Mesh...');
+      setLoadingMsg('Building Mesh...');
       workerRef.current?.postMessage({ type: 'BUILD_MESH', payload: { posts: headers } });
     } catch (e: any) {
         alert("Connection Failed: " + e.message);
@@ -449,7 +267,7 @@ const App: React.FC = () => {
 
   const startBatch = (ids: number[] = []) => {
     if (!aiConfig.apiKey) {
-        alert("Please configure your AI Provider API Key in Settings.");
+        alert("Please configure API Key.");
         setIsSettingsOpen(true);
         return;
     }
@@ -465,115 +283,62 @@ const App: React.FC = () => {
             id: h.id.toString(),
             slug: p?.slug || 'unknown',
             status: h.status === 'published' ? 'completed' : 'completed',
-            decayScore: 100 - h.score,
             draftHtml: h.draftHtml, 
             aiResult: h.aiResult,   
             productOverrides: h.productOverrides,
-            customImageUrl: h.customImageUrl,
-            suggestion: h.aiResult ? {
-                oldProductName: h.aiResult.detectedOldProduct,
-                successorProductName: h.aiResult.identifiedNewProduct,
-                verdictSummary: h.aiResult.verdictData.summary,
-                intro: h.aiResult.blufSentence,
-                pros: h.aiResult.verdictData.pros,
-                cons: h.aiResult.verdictData.cons,
-                comparisonTable: [], 
-                faqs: [],
-            } : undefined,
         };
     });
 
-  const handleDeepScan = (ids: number[]) => {
-      if (!connection) return;
-      ids.forEach(id => setHealthData(prev => ({ ...prev, [id]: { ...prev[id], status: 'scanning' } })));
-      const BATCH_SIZE = 5; 
-      let i = 0;
-      const scanBatch = async () => {
-          if (i >= ids.length) return;
-          const batchIds = ids.slice(i, i + BATCH_SIZE);
-          await Promise.all(batchIds.map(async (id) => {
-              try {
-                  const fullPost = await fetchPostContent(connection, id);
-                  workerRef.current?.postMessage({
-                      type: 'ANALYZE_HEALTH',
-                      payload: { id, content: fullPost.content.rendered, modified: fullPost.modified, siteUrl: connection.url }
-                  });
-              } catch (e: any) {
-                  setHealthData(prev => ({ ...prev, [id]: { ...prev[id], status: 'error', log: e.message } }));
-              }
-          }));
-          i += BATCH_SIZE;
-          setTimeout(scanBatch, 50); 
-      };
-      scanBatch();
-  };
-
-  const stopProcessing = () => { setQueue([]); setProcessing([]); setLoadingMsg(''); };
-
-  // --- SOTA LANDING PAGE INTEGRATION ---
-  if (showLanding) {
-      return <LandingPage onEnterApp={() => setShowLanding(false)} />;
-  }
-
+  if (showLanding) return <LandingPage onEnterApp={() => setShowLanding(false)} />;
   if (!connection) return <ConnectModal onConnect={handleConnect} />;
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-200 font-sans selection:bg-emerald-500/30 pb-20 flex flex-col">
+    <div className="min-h-screen bg-[#020617] text-slate-200 font-sans selection:bg-emerald-500/30 flex flex-col">
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={aiConfig} onSave={setAiConfig} />
-      <header className="border-b border-white/5 bg-slate-950/50 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-             {viewMode === 'review' && <button onClick={() => setViewMode('dashboard')} className="mr-2 p-2 bg-slate-800 rounded-full hover:bg-slate-700 transition-colors"><ArrowLeft size={18} /></button>}
-             <div className="h-10 w-10 bg-gradient-to-br from-emerald-500 to-indigo-600 rounded-xl flex items-center justify-center text-white shadow-[0_0_20px_rgba(16,185,129,0.4)]"><BrainCircuit size={24} fill="currentColor" /></div>
-             <div><h1 className="font-bold text-xl tracking-tight text-white">Neural<span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-indigo-400">Mesh</span></h1><p className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">AEO SOTA Engine 2026</p></div>
+      
+      {/* HEADER */}
+      <header className="border-b border-white/5 bg-slate-950/50 backdrop-blur-md sticky top-0 z-50">
+        <div className="max-w-[1600px] mx-auto px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+             {viewMode === 'review' && <button onClick={() => setViewMode('dashboard')} className="p-2 bg-slate-800 rounded-full hover:bg-slate-700"><ArrowLeft size={18} /></button>}
+             <div className="flex items-center gap-3">
+                 <div className="h-9 w-9 bg-emerald-600 rounded-lg flex items-center justify-center text-white shadow shadow-emerald-500/30"><BrainCircuit size={20} /></div>
+                 <div><h1 className="font-bold text-lg text-white leading-none">Neural<span className="text-emerald-400">Mesh</span></h1><p className="text-[9px] text-slate-500 font-mono uppercase">V2.0 Autonomous</p></div>
+             </div>
           </div>
           
           <div className="flex items-center gap-6">
-             {/* AUTOPILOT TOGGLE */}
-             <div className="flex items-center gap-2 bg-slate-900 rounded-full p-1 pl-4 border border-slate-800">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Autonomous Mode</span>
-                <button 
-                    onClick={() => setAutoPilot(!autoPilot)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${autoPilot ? 'bg-emerald-500' : 'bg-slate-700'}`}
-                >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoPilot ? 'translate-x-6' : 'translate-x-1'}`} />
+             {/* DRAFT MODE TOGGLE */}
+             <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800">
+                <button onClick={() => setDraftMode('full')} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center transition-all ${draftMode === 'full' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>
+                    <Layers size={14} className="mr-2"/> Full Rewrite
+                </button>
+                <button onClick={() => setDraftMode('refresh')} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center transition-all ${draftMode === 'refresh' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>
+                    <Zap size={14} className="mr-2"/> Fast Refresh
                 </button>
              </div>
-             {autoPilot && (
-                <div className="flex items-center text-xs text-emerald-400 animate-pulse">
-                    <Activity size={14} className="mr-2" />
-                    AI Agent Active
-                </div>
-             )}
 
-             {loadingMsg && <div className="flex items-center text-xs text-emerald-400 animate-pulse font-mono mr-4"><DownloadCloud size={14} className="mr-2" />{loadingMsg}</div>}
-             {queue.length > 0 && <button onClick={stopProcessing} className="flex items-center text-xs bg-red-500/20 text-red-400 px-3 py-1.5 rounded border border-red-500/50 hover:bg-red-500 hover:text-white transition-all"><Square size={12} fill="currentColor" className="mr-1.5"/> STOP</button>}
+             {queue.length > 0 && <div className="text-xs font-bold text-indigo-400 animate-pulse flex items-center"><Activity size={14} className="mr-2"/> Processing {queue.length} items...</div>}
              
              <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-                 <button onClick={() => setViewMode('dashboard')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'dashboard' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Dashboard</button>
-                 <button onClick={() => setViewMode('review')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center ${viewMode === 'review' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Reviews {reviewItems.length > 0 && <span className="ml-1.5 bg-white text-indigo-600 px-1.5 rounded-full text-[10px]">{reviewItems.length}</span>}</button>
+                 <button onClick={() => setViewMode('dashboard')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>Dashboard</button>
+                 <button onClick={() => setViewMode('review')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'review' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>
+                    Reviews {reviewItems.length > 0 && <span className="ml-1 bg-white text-emerald-600 px-1 rounded-full text-[9px]">{reviewItems.length}</span>}
+                 </button>
              </div>
-             <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white"><Settings size={20} /></button>
+             <button onClick={() => setIsSettingsOpen(true)} className="text-slate-400 hover:text-white"><Settings size={20} /></button>
           </div>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto px-6 py-12 flex-1 w-full flex flex-col">
+
+      {/* MAIN */}
+      <main className="max-w-[1600px] mx-auto px-6 py-8 flex-1 w-full flex flex-col">
         {viewMode === 'dashboard' ? (
-            <>
-                <div className="bg-gradient-to-r from-slate-900 to-slate-900/50 border border-white/5 rounded-3xl p-8 mb-10 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl shrink-0">
-                    <div><h2 className="text-3xl font-bold text-white mb-2">Site Intelligence Mesh</h2><p className="text-slate-400 max-w-xl leading-relaxed"><span className="text-emerald-400 font-bold">{semanticNodes.length} entities</span> indexed.</p></div>
-                    <div className="flex items-center gap-4">
-                        {queue.length > 0 && <div className="text-xs font-bold text-indigo-400 bg-indigo-900/30 px-3 py-1.5 rounded-lg border border-indigo-500/30">Queue: {queue.length}</div>}
-                        <div className="bg-slate-900/50 border border-slate-800 px-4 py-2 rounded-xl text-center">
-                             <div className="text-slate-500 text-[10px] uppercase font-bold">Posts Restored</div>
-                             <div className="text-xl font-bold text-emerald-400">{(Object.values(healthData) as PostHealth[]).filter(h => h.status === 'published' || h.status === 'review_pending').length}</div>
-                        </div>
-                    </div>
-                </div>
-                <div className="flex-1 min-h-0 relative"><div className="absolute inset-0 overflow-hidden"><PostList posts={posts} healthData={healthData} onOptimize={startBatch} onScan={handleDeepScan} isProcessing={queue.length > 0} onReview={(id) => { setViewMode('review'); }} /></div></div>
-            </>
+            <div className="flex-1 flex flex-col">
+                <PostList posts={posts} healthData={healthData} onOptimize={startBatch} onScan={() => {}} isProcessing={queue.length > 0} onReview={() => setViewMode('review')} />
+            </div>
         ) : (
-            <ReviewResults items={reviewItems} config={aiConfig} onOpenSettings={() => setIsSettingsOpen(true)} onUpdateItem={handleUpdateItem} customPublishHandler={async (item) => { const draft = healthData[parseInt(item.id)]?.draftHtml; if (draft) { await handlePublish(item.id, draft); } else { throw new Error("Draft content missing"); } }} />
+            <ReviewResults items={reviewItems} config={aiConfig} onOpenSettings={() => setIsSettingsOpen(true)} onUpdateItem={handleUpdateItem} customPublishHandler={async (item) => { const draft = healthData[parseInt(item.id)]?.draftHtml; if (draft) await handlePublish(item.id, draft); }} />
         )}
       </main>
     </div>

@@ -1,6 +1,8 @@
 
 export type AIProvider = 'gemini' | 'openai' | 'anthropic' | 'groq' | 'openrouter';
 
+export type DraftMode = 'full' | 'refresh';
+
 export interface WPConnection {
   url: string;
   username: string;
@@ -27,7 +29,7 @@ export interface PostHealth {
   id: number;
   score: number;
   aeoScore: number;
-  opportunityScore: number; // SOTA Metric: (WordCount * Decay)
+  opportunityScore: number; 
   metrics: {
     wordCount: number;
     hasSchema: boolean;
@@ -82,7 +84,6 @@ export interface SerperResult {
   paa: PAAData[];
 }
 
-// SOTA Amazon Product Data
 export interface AmazonProduct {
   asin: string;
   title: string;
@@ -99,29 +100,37 @@ export interface ProductDetection {
   name: string;
   url: string;
   asin?: string;
-  amazonData?: AmazonProduct; // Real-time data from PA-API
+  amazonData?: AmazonProduct; 
+}
+
+// V2 Strategy Object from AI Step 1
+export interface AIStrategy {
+    oldProduct: string;
+    newProduct: string;
+    primaryKeyword: string;
+    secondaryKeywords: string[];
+    targetAudience: string;
+    verdict: VerdictData;
+    specs: { price: string; rating: number; reviewCount: number };
+    internalLinkIds: number[]; // AI selects IDs, we inject URLs
+    outline: string[];
+    bluf: string;
+    commercialIntent: boolean;
 }
 
 export interface AIAnalysisResult {
+  strategy: AIStrategy;
   newTitle: string;
   metaDescription: string;
-  blufSentence: string;
   sgeSummaryHTML: string;
-  verdictData: VerdictData;
-  productBoxHTML?: string;
+  productBoxHTML: string;
   comparisonTableHTML: string;
   faqHTML: string;
   schemaJSON: string;
-  contentWithLinks: string;
+  contentWithLinks: string; // The Final HTML body
   referencesHTML: string;
-  detectedOldProduct: string;
-  identifiedNewProduct: string;
-  newProductSpecs: { price: string; rating: number; reviewCount: number };
-  keywordsUsed?: string[]; 
-  commercialIntent: boolean; 
   detectedProducts: ProductDetection[];
-  usedInternalLinks?: string[]; 
-  citationMap?: Record<string, string>;
+  keywordCoverage: { used: number; total: number; missing: string[] };
 }
 
 export interface AIConfig {
@@ -133,11 +142,11 @@ export interface AIConfig {
   wpUrl?: string;
   wpUsername?: string;
   wpAppPassword?: string;
-  // Amazon PA-API Credentials
   amazonAffiliateTag?: string;
   amazonAccessKey?: string;
   amazonSecretKey?: string;
-  amazonRegion?: string; // e.g., 'us-east-1'
+  amazonRegion?: string; 
+  draftMode?: DraftMode; 
 }
 
 export interface ContentUpdateSuggestion {
