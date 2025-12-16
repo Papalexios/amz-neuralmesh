@@ -103,17 +103,59 @@ export const fetchRecentPostHeaders = async (conn: WPConnection): Promise<WPPost
 };
 
 export const fetchPostContent = async (conn: WPConnection, id: number): Promise<WPPostFull> => {
-  // Optimized: Only fetch essential fields (id, content, modified, title, link, slug)
-  // Context=edit is CRITICAL for raw data, requires Auth
-  const res = await fetchWithRetry(`${cleanUrl(conn.url)}/wp-json/wp/v2/posts/${id}?context=edit&_fields=id,content,modified,title,link,slug`, {
-    headers: { 'Authorization': getAuthHeader(conn) }
-  });
-  
-  if (!res.ok) {
-      if (res.status === 401) throw new Error("WP Error 401: Authorization Failed. Reconnect with valid credentials.");
-      throw new Error(`WP Error: ${res.status} ${res.statusText}`);
+  const baseUrl = cleanUrl(conn.url);
+  const authHeaders = { 'Authorization': getAuthHeader(conn) };
+
+  // STRATEGY 1: Authenticated Edit Context (Best Data, includes protected content)
+  try {
+      const res = await fetchWithRetry(`${baseUrl}/wp-json/wp/v2/posts/${id}?context=edit&_fields=id,content,modified,title,link,slug`, {
+        headers: authHeaders
+      });
+      
+      if (res.ok) return await res.json();
+      
+      // If 4xx, strictly throw to trigger fallback
+      if (res.status >= 400 && res.status < 500) {
+          throw new Error(`Context Fetch Failed: ${res.status}`);
+      }
+      // If 5xx, throw as well
+      throw new Error(`Server Error: ${res.status}`);
+  } catch (e) {
+      console.warn(`[WP Service] Strategy 1 (Edit Context) failed for ID ${id}.`, e);
   }
-  return await res.json();
+
+  // STRATEGY 2: Public View (Standard Route)
+  // Sometimes 'context=edit' is blocked by security plugins, but public read is open.
+  try {
+      const resFallback = await fetchWithRetry(`${baseUrl}/wp-json/wp/v2/posts/${id}?_fields=id,content,modified,title,link,slug`, {
+          headers: authHeaders 
+      });
+      
+      if (resFallback.ok) return await resFallback.json();
+  } catch (e) {
+      console.warn(`[WP Service] Strategy 2 (Public Route) failed for ID ${id}.`, e);
+  }
+
+  // STRATEGY 3: Ultimate Fallback (Filter Query)
+  // Fixes "404 Not Found" on single resources caused by Broken Permalinks or Nginx Rewrite Rules.
+  // /wp-json/wp/v2/posts?include=123 ALWAYS works if the list endpoint works (which it does, since we listed posts).
+  try {
+      console.log(`[WP Service] Engaging Strategy 3 (List Filter) for ID ${id}...`);
+      const resList = await fetchWithRetry(`${baseUrl}/wp-json/wp/v2/posts?include=${id}&_fields=id,content,modified,title,link,slug`, {
+          headers: authHeaders
+      });
+      
+      if (resList.ok) {
+          const data = await resList.json();
+          if (Array.isArray(data) && data.length > 0) {
+              return data[0];
+          }
+      }
+  } catch (e) {
+      console.error(`[WP Service] Strategy 3 (List Filter) failed for ID ${id}.`, e);
+  }
+
+  throw new Error(`Could not fetch post content (ID: ${id}). All strategies failed. Check permalinks setting in WordPress.`);
 };
 
 export const updatePostRemote = async (conn: WPConnection, id: number, data: any): Promise<void> => {

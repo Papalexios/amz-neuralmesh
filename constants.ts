@@ -1,3 +1,4 @@
+
 import { Home, BarChart2, Wand2, FileText } from 'lucide-react';
 import { AIProvider } from './types';
 
@@ -12,7 +13,7 @@ export const CURRENT_YEAR = new Date().getFullYear();
 export const DECAY_KEYWORDS = ['review', 'best', 'vs', 'guide'];
 
 export const DEFAULT_MODELS: Record<AIProvider, string> = {
-  gemini: 'gemini-1.5-flash',
+  gemini: 'gemini-2.5-flash',
   openai: 'gpt-4-turbo',
   anthropic: 'claude-3-opus-20240229',
   groq: 'llama3-70b-8192',
@@ -20,7 +21,7 @@ export const DEFAULT_MODELS: Record<AIProvider, string> = {
 };
 
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  gemini: 'Google Gemini 1.5 Flash (Fast & Stable)',
+  gemini: 'Google Gemini 2.5 Flash (Fast & Stable)',
   openai: 'OpenAI GPT-4 Turbo',
   anthropic: 'Anthropic Claude 3',
   groq: 'Groq (Llama 3 70B)',

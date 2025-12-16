@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { WPConnection, WPPostHeader, WPPostFull, PostHealth, SemanticNode, AIConfig, AIAnalysisResult, ProcessedItem, DraftMode } from './types';
 import { fetchAllPostHeaders, fetchPostContent, updatePostRemote } from './services/wordpressService';
-import { stripHtmlPreservingStructure, tokenize, calculateRelevance, parseHealth, calculateScore } from './utils/helpers';
+import { stripHtmlPreservingStructure, tokenize, calculateRelevance, parseHealth, calculateScore, renderFinalHtml } from './utils/helpers';
 import { analyzeAndGenerateAssets } from './services/aiService';
 import { searchSerper } from './services/serperService';
 import ConnectModal from './components/ConnectModal';
@@ -13,7 +13,7 @@ import { Network, BrainCircuit, Settings, DownloadCloud, Square, ArrowLeft, Acti
 import { DEFAULT_MODELS } from './constants';
 import { LandingPage } from './components/LandingPage';
 
-// ... (Keep existing WORKER_CODE variable unchanged for brevity, assume it is present) ...
+// ... (Keep existing WORKER_CODE variable unchanged) ...
 const WORKER_CODE = `
 const tokenize = (text) => {
   const stopWords = new Set(['the', 'and', 'is', 'in', 'it', 'to', 'of', 'for', 'with', 'on', 'at', 'by', 'a', 'an']);
@@ -201,19 +201,27 @@ const App: React.FC = () => {
 
   useEffect(() => { processQueue(); }, [processQueue]);
 
+  // --- REAL-TIME RENDERER ON UPDATE ---
   const handleUpdateItem = (id: string, updates: Partial<ProcessedItem>) => {
       setHealthData(prev => {
           const numId = parseInt(id);
           if (!prev[numId]) return prev;
 
-          // Type Safety: Only copy compatible fields from ProcessedItem to PostHealth
           const compatibleUpdates: Partial<PostHealth> = {};
           if (updates.productOverrides) compatibleUpdates.productOverrides = updates.productOverrides;
           if (updates.draftHtml) compatibleUpdates.draftHtml = updates.draftHtml;
           if (updates.customImageUrl) compatibleUpdates.customImageUrl = updates.customImageUrl;
           if (updates.manualMapping) compatibleUpdates.manualMapping = updates.manualMapping;
-          // We intentionally skip 'id' (type mismatch) and 'status' (enum mismatch)
-          // unless we explicitely map status values, but mostly we update data fields here.
+          
+          // HOT RELOAD: If overrides changed, re-render from template immediately
+          const currentItem = prev[numId];
+          const template = currentItem.aiResult?.contentTemplate;
+          if (updates.productOverrides && template && currentItem.aiResult) {
+               // Merge existing overrides with new updates
+               const newOverrides = updates.productOverrides;
+               const newHtml = renderFinalHtml(template, currentItem.aiResult.detectedProducts, newOverrides, aiConfig.amazonAffiliateTag);
+               compatibleUpdates.draftHtml = newHtml;
+          }
 
           return { ...prev, [numId]: { ...prev[numId], ...compatibleUpdates } };
       });
@@ -223,20 +231,10 @@ const App: React.FC = () => {
       if (!connection) return;
       try {
           const numId = parseInt(id);
-          const item = healthData[numId];
-          let finalContent = content;
+          // Note: Content passed here is the `draftHtml` which is already fully rendered by handleUpdateItem
+          // or initial generation. We trust it is WYSIWYG.
           
-          // Apply overrides strictly via DOM if possible, otherwise regex
-          try {
-              if (item?.productOverrides) {
-                 // Simple regex replacement for stability
-                 Object.entries(item.productOverrides).forEach(([k, v]) => {
-                     finalContent = finalContent.replace(new RegExp(k, 'g'), v as string);
-                 });
-              }
-          } catch(e) { console.warn("Publish Override Error", e); }
-
-          await updatePostRemote(connection, numId, { content: finalContent, date: new Date().toISOString() });
+          await updatePostRemote(connection, numId, { content: content, date: new Date().toISOString() });
           setHealthData(prev => ({ ...prev, [numId]: { ...prev[numId], status: 'published' } }));
       } catch (e: any) {
           throw new Error(e.message);
@@ -286,18 +284,20 @@ const App: React.FC = () => {
             draftHtml: h.draftHtml, 
             aiResult: h.aiResult,   
             productOverrides: h.productOverrides,
+            manualMapping: h.manualMapping,
         };
     });
 
   if (showLanding) return <LandingPage onEnterApp={() => setShowLanding(false)} />;
   if (!connection) return <ConnectModal onConnect={handleConnect} />;
 
+  // FIXED: Changed min-h-screen to h-screen overflow-hidden to ensure internal scrollbars work
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-200 font-sans selection:bg-emerald-500/30 flex flex-col">
+    <div className="h-screen overflow-hidden bg-[#020617] text-slate-200 font-sans selection:bg-emerald-500/30 flex flex-col">
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={aiConfig} onSave={setAiConfig} />
       
       {/* HEADER */}
-      <header className="border-b border-white/5 bg-slate-950/50 backdrop-blur-md sticky top-0 z-50">
+      <header className="border-b border-white/5 bg-slate-950/50 backdrop-blur-md shrink-0 z-50">
         <div className="max-w-[1600px] mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
              {viewMode === 'review' && <button onClick={() => setViewMode('dashboard')} className="p-2 bg-slate-800 rounded-full hover:bg-slate-700"><ArrowLeft size={18} /></button>}
@@ -332,9 +332,10 @@ const App: React.FC = () => {
       </header>
 
       {/* MAIN */}
-      <main className="max-w-[1600px] mx-auto px-6 py-8 flex-1 w-full flex flex-col">
+      {/* FIXED: Added overflow-hidden to main to constrain children */}
+      <main className="max-w-[1600px] mx-auto px-6 py-8 flex-1 w-full flex flex-col overflow-hidden">
         {viewMode === 'dashboard' ? (
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col overflow-hidden">
                 <PostList posts={posts} healthData={healthData} onOptimize={startBatch} onScan={() => {}} isProcessing={queue.length > 0} onReview={() => setViewMode('review')} />
             </div>
         ) : (

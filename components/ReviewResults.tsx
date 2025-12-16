@@ -1,8 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { ProcessedItem, AIConfig } from '../types';
-import { Search, Loader2, Send, FileText, BarChart3, Monitor, Smartphone, Check, AlertTriangle, ShoppingBag, ExternalLink, Link2, Tag, Zap, Clock } from 'lucide-react';
-import { constructAmazonUrl, isValidAsin } from '../utils/helpers';
+import { Search, Loader2, Send, FileText, BarChart3, Monitor, ShoppingBag, ExternalLink, Clock, Zap, Check, Image as ImageIcon } from 'lucide-react';
 
 interface ReviewResultsProps {
   items: ProcessedItem[];
@@ -11,8 +10,6 @@ interface ReviewResultsProps {
   onUpdateItem: (id: string, updates: Partial<ProcessedItem>) => void;
   customPublishHandler?: (item: ProcessedItem) => Promise<void>;
 }
-
-const ITEMS_PER_PAGE = 20;
 
 export const ReviewResults: React.FC<ReviewResultsProps> = ({ items, config, onUpdateItem, customPublishHandler }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -30,27 +27,18 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({ items, config, onU
 
   const currentItem = filteredItems[selectedIndex] || filteredItems[0];
 
-  // DOM Preview Engine
-  const previewHtml = useMemo(() => {
-      if (!currentItem?.draftHtml) return "";
-      try {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(currentItem.draftHtml, 'text/html');
-          
-          // Apply Overrides
-          if (currentItem.productOverrides) {
-              const links = Array.from(doc.querySelectorAll('a'));
-              Object.entries(currentItem.productOverrides).forEach(([key, val]) => {
-                  links.forEach(l => {
-                      if (l.href === key || l.href.includes(key)) l.href = val as string;
-                  });
-              });
+  const handleUpdateOverride = (productName: string, field: 'asin' | 'image' | 'price', value: string) => {
+      if (!currentItem) return;
+      const currentOverrides = currentItem.productOverrides || {};
+      const productOverride = currentOverrides[productName] || {};
+      
+      onUpdateItem(currentItem.id, {
+          productOverrides: {
+              ...currentOverrides,
+              [productName]: { ...productOverride, [field]: value }
           }
-          return doc.body.innerHTML;
-      } catch {
-          return currentItem.draftHtml;
-      }
-  }, [currentItem]);
+      });
+  };
 
   const handlePublish = async () => {
       if (!currentItem || !customPublishHandler) return;
@@ -144,28 +132,6 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({ items, config, onU
                {activeTab === 'control' && strategy && (
                    <div className="max-w-5xl mx-auto space-y-6">
                        
-                       {/* Scorecard */}
-                       <div className="grid grid-cols-4 gap-4">
-                           <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                               <div className="text-xs text-slate-400 font-bold uppercase mb-1">Verdict Score</div>
-                               <div className="text-3xl font-bold text-white">{strategy.verdict.score}<span className="text-sm text-slate-500">/100</span></div>
-                           </div>
-                           <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                               <div className="text-xs text-slate-400 font-bold uppercase mb-1">Keywords Hit</div>
-                               <div className={`text-3xl font-bold ${coverage && coverage.used > 20 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                   {coverage?.used || 0}<span className="text-sm text-slate-500">/{coverage?.total}</span>
-                               </div>
-                           </div>
-                           <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                               <div className="text-xs text-slate-400 font-bold uppercase mb-1">Internal Links</div>
-                               <div className="text-3xl font-bold text-emerald-400">{strategy.internalLinkIds.length}</div>
-                           </div>
-                           <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                               <div className="text-xs text-slate-400 font-bold uppercase mb-1">Readability</div>
-                               <div className="text-3xl font-bold text-indigo-400">Gd. 6</div>
-                           </div>
-                       </div>
-
                        {/* Strategy Map */}
                        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
                             <h3 className="text-lg font-bold text-white mb-4 flex items-center"><FileText size={18} className="mr-2 text-indigo-400"/> Strategy Execution</h3>
@@ -189,43 +155,53 @@ export const ReviewResults: React.FC<ReviewResultsProps> = ({ items, config, onU
                             </div>
                        </div>
 
-                       {/* Monetization Matrix */}
+                       {/* Monetization Matrix (Multi-Product) */}
                        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 border-l-4 border-l-emerald-500">
                            <h3 className="text-lg font-bold text-white mb-4 flex items-center"><ShoppingBag size={18} className="mr-2 text-emerald-400"/> Monetization Matrix</h3>
-                           <div className="space-y-3">
+                           <div className="space-y-4">
                                 {currentItem.aiResult?.detectedProducts.map((prod, i) => (
-                                    <div key={i} className="flex items-center justify-between bg-slate-900 p-4 rounded-lg border border-slate-700">
-                                        <div className="flex items-center">
-                                            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 mr-3 border border-slate-600">{i+1}</div>
-                                            <div>
-                                                <div className="text-white font-bold text-sm">{prod.name}</div>
-                                                <a href={prod.url} target="_blank" className="text-xs text-slate-500 hover:text-emerald-400 flex items-center mt-0.5 truncate max-w-[300px]"><ExternalLink size={10} className="mr-1"/> {prod.url}</a>
+                                    <div key={i} className="flex flex-col md:flex-row items-start md:items-center justify-between bg-slate-900 p-4 rounded-lg border border-slate-700 gap-4">
+                                        <div className="flex items-center min-w-0 flex-1">
+                                            <div className="w-8 h-8 shrink-0 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 mr-3 border border-slate-600">{i+1}</div>
+                                            <div className="min-w-0">
+                                                <div className="text-white font-bold text-sm truncate pr-2">{prod.name}</div>
+                                                <a href={prod.url} target="_blank" className="text-xs text-slate-500 hover:text-emerald-400 flex items-center mt-0.5 truncate"><ExternalLink size={10} className="mr-1"/> {prod.url}</a>
                                             </div>
                                         </div>
-                                        <div className="flex items-center space-x-4">
-                                            <div className="text-right">
-                                                <div className="text-xs text-slate-500 font-bold uppercase">ASIN</div>
-                                                <div className="text-emerald-400 font-mono text-sm">{prod.asin || '---'}</div>
+                                        
+                                        <div className="flex flex-wrap gap-2 items-center w-full md:w-auto">
+                                            <div className="flex items-center bg-slate-950 border border-slate-700 rounded-md px-2">
+                                                <span className="text-xs text-slate-500 font-bold mr-2">ASIN:</span>
+                                                <input 
+                                                    type="text" 
+                                                    placeholder={prod.asin || "B0..."}
+                                                    value={currentItem.productOverrides?.[prod.name]?.asin || ''}
+                                                    onChange={(e) => handleUpdateOverride(prod.name, 'asin', e.target.value)}
+                                                    className="bg-transparent py-2 text-xs text-emerald-400 w-24 outline-none font-mono"
+                                                />
                                             </div>
-                                            <input 
-                                                type="text" 
-                                                placeholder="Override URL..."
-                                                value={currentItem.productOverrides?.[prod.url] || ''}
-                                                onChange={(e) => onUpdateItem(currentItem.id, { productOverrides: { ...currentItem.productOverrides, [prod.url]: e.target.value } })}
-                                                className="bg-slate-950 border border-slate-700 rounded-md py-2 px-3 text-xs text-white w-48 focus:border-emerald-500 outline-none"
-                                            />
+
+                                            <div className="flex items-center bg-slate-950 border border-slate-700 rounded-md px-2">
+                                                <ImageIcon size={12} className="text-slate-500 mr-2" />
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="Image URL..."
+                                                    value={currentItem.productOverrides?.[prod.name]?.image || ''}
+                                                    onChange={(e) => handleUpdateOverride(prod.name, 'image', e.target.value)}
+                                                    className="bg-transparent py-2 text-xs text-white w-32 outline-none"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
                            </div>
                        </div>
-
                    </div>
                )}
 
                {activeTab === 'preview' && (
                    <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-xl min-h-[800px] p-8">
-                       <div className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                       <div className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: currentItem.draftHtml || '' }} />
                    </div>
                )}
            </div>

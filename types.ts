@@ -45,9 +45,16 @@ export interface PostHealth {
   log?: string;
   draftHtml?: string;
   aiResult?: AIAnalysisResult;
-  productOverrides?: Record<string, string>;
+  productOverrides?: Record<string, ProductOverride>;
   customImageUrl?: string;
   manualMapping?: ManualMapping;
+}
+
+export interface ProductOverride {
+    title?: string;
+    asin?: string;
+    image?: string;
+    price?: string;
 }
 
 export interface SemanticNode {
@@ -116,6 +123,7 @@ export interface AIStrategy {
     outline: string[];
     bluf: string;
     commercialIntent: boolean;
+    products?: Array<{ name: string; context: string; recommended: boolean }>; // Multi-product support
 }
 
 export interface AIAnalysisResult {
@@ -127,7 +135,8 @@ export interface AIAnalysisResult {
   comparisonTableHTML: string;
   faqHTML: string;
   schemaJSON: string;
-  contentWithLinks: string; // The Final HTML body
+  contentTemplate?: string; // HTML with [[PRODUCT_BOX:n]] placeholders
+  contentWithLinks: string; // The Final HTML body (Rendered)
   referencesHTML: string;
   detectedProducts: ProductDetection[];
   keywordCoverage: { used: number; total: number; missing: string[] };
@@ -169,8 +178,9 @@ export interface ProcessedItem {
   suggestion?: ContentUpdateSuggestion; 
   draftHtml?: string;
   aiResult?: AIAnalysisResult;
-  productOverrides?: Record<string, string>;
+  productOverrides?: Record<string, ProductOverride>;
   customImageUrl?: string;
+  manualMapping?: ManualMapping;
 }
 
 export interface SitemapUrl {
